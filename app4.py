@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import datetime
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.tools.tavily_search import TavilySearchResults
@@ -11,37 +12,34 @@ from typing import TypedDict, Annotated, List
 # Load environment variables
 load_dotenv()
 
-# Initialize Gemini LLM
+# Gemini LLM
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.3, verbose=False)
 
-# Tavily tool for web search
+# Tavily Search Tool
 search_tool = TavilySearchResults(k=5)
 tools = [search_tool]
 tools_dict = {tool.name: tool for tool in tools}
 llm_with_tools = llm.bind_tools(tools)
 
-# Agent state
+# Agent State
 class AgentState(TypedDict):
     messages: Annotated[List, add_messages]
     symptoms: str
     diagnosis_complete: bool
 
-# System prompt
+# System Prompt
 MEDICAL_SYSTEM_PROMPT = """
 You are an experienced and knowledgeable medical AI assistant acting as a licensed doctor.
 
 Given the patient's symptoms, perform the following steps carefully:
 
-1. Identify the most likely medical condition(s) based on symptoms.
-2. Provide a clear diagnosis name.
-3. Recommend specific medicines with:
-   - Medicine name and exact strength
-   - Dosage quantity per intake
-   - Frequency
-   - Duration
-4. Include precautions, potential side effects, and warnings.
-5. Suggest when to seek immediate medical attention.
-6. Suggest self-care/lifestyle advice.
+1. Identify the most likely medical condition(s).
+2. Provide a clear diagnosis.
+3. Recommend specific medicines:
+   - Name, strength, dosage, frequency, and duration
+4. Include precautions and side effects
+5. Suggest when to see a doctor
+6. Provide self-care advice
 
 Format:
 
@@ -50,10 +48,10 @@ Format:
 **Medicines:**
 - [Medicine]: [Dosage] - [Frequency] - [Duration]
 
-**Precautions:** [Precautions]
+**Precautions:** [Details]
 """
 
-# LangGraph agent
+# LangGraph Logic
 def should_continue(state: AgentState):
     last_message = state["messages"][-1]
     return "tools" if hasattr(last_message, 'tool_calls') and last_message.tool_calls else "end"
@@ -99,47 +97,33 @@ def diagnose_symptoms(symptoms: str) -> str:
         result = medical_agent.invoke(initial_state)
         return result["messages"][-1].content
     except Exception as e:
-        return f"Error in diagnosis: {str(e)}"
+        return f"Error: {str(e)}"
 
-# --------------------- Streamlit UI -----------------------
+# ---------------- Streamlit UI ----------------
+st.set_page_config("🩺 HealthMate AI", layout="centered", page_icon="🩺")
 
-st.set_page_config("🩺 HealthMate AI", layout="wide")
-
-# Sidebar
-with st.sidebar:
-    st.markdown("### 🩺 HealthMate AI")
-    st.info("Enter your symptoms below to receive medical advice powered by AI.")
-    st.caption("💡 Built with Gemini, Tavily & LangGraph")
+st.title("🩺 HealthMate AI")
+st.caption("Your private AI health assistant. Enter your symptoms below to get a medical diagnosis.")
 
 # Session State
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Main title
-st.markdown("<h2 style='text-align:center;'>💬 Describe Your Symptoms</h2>", unsafe_allow_html=True)
+# Show previous chat messages
+for message in st.session_state.chat_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# Input text area
-with st.container():
-    symptoms = st.text_area(
-        "Enter symptoms here...",
-        placeholder="Ex: High fever, body ache, sore throat for 2 days...",
-        height=150,
-        label_visibility="collapsed"
-    )
+# User input
+if prompt := st.chat_input("Describe your symptoms..."):
+    # Show user's message
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
 
-    if st.button("🔍 Diagnose"):
-        if symptoms.strip():
-            with st.spinner("🤖 Analyzing your symptoms..."):
-                reply = diagnose_symptoms(symptoms)
-                st.session_state.chat_history.insert(0, {"role": "assistant", "content": reply})
-                st.session_state.chat_history.insert(0, {"role": "user", "content": symptoms})
-        else:
-            st.warning("Please enter symptoms before diagnosis.")
-
-# Chat history
-if st.session_state.chat_history:
-    st.markdown("---")
-    st.markdown("### 🧾 Diagnosis Results")
-    for chat in st.session_state.chat_history:
-        with st.chat_message(name=chat["role"], avatar="🧍" if chat["role"] == "user" else "🩺"):
-            st.markdown(chat["content"], unsafe_allow_html=True)
+    # Show assistant response
+    with st.chat_message("assistant"):
+        with st.spinner("Analyzing symptoms..."):
+            response = diagnose_symptoms(prompt)
+            st.markdown(response)
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
